@@ -20,7 +20,7 @@ android {
     }
     defaultConfig {
         applicationId = gropify.project.module.app.packageName
-        minSdk = gropify.project.android.minSdk
+        minSdk = maxOf(26, gropify.project.android.minSdk)
         targetSdk = gropify.project.android.targetSdk
         versionName = gropify.project.module.app.versionName
         versionCode = gropify.project.module.app.versionCode
