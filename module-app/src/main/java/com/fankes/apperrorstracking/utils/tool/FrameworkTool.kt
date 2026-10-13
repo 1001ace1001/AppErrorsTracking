@@ -21,370 +21,130 @@
  */
 package com.fankes.apperrorstracking.utils.tool
 
-import android.content.Context
+import android.content.*
+import android.os.*
+import android.content.pm.PackageManager
 import com.fankes.apperrorstracking.R
-import com.fankes.apperrorstracking.bean.AppErrorsInfoBean
-import com.fankes.apperrorstracking.bean.AppFiltersBean
-import com.fankes.apperrorstracking.bean.AppInfoBean
-import com.fankes.apperrorstracking.bean.MutedErrorsAppBean
-import com.fankes.apperrorstracking.const.PackageName
 import com.fankes.apperrorstracking.utils.factory.execShell
 import com.fankes.apperrorstracking.utils.factory.isRootAccess
 import com.fankes.apperrorstracking.utils.factory.showDialog
-import com.highcapable.yukihookapi.hook.factory.dataChannel
-import com.highcapable.yukihookapi.hook.param.PackageParam
-import com.highcapable.yukihookapi.hook.xposed.channel.data.ChannelData
+import com.fankes.apperrorstracking.bean.*
+import com.fankes.apperrorstracking.wrapper.BuildConfigWrapper
+import com.google.gson.Gson
+import java.util.concurrent.Executors
 
-/**
- * 系统框架控制工具
- */
+/** Signature-gated discovery; all data travels through authenticated Binder calls. */
 object FrameworkTool {
-
-    private const val CALL_REFRESH_HOST_PREFS_DATA = "call_refresh_host_prefs_data"
-    private const val CALL_APP_ERRORS_DATA_GET = "call_app_errors_data_get"
-    private const val CALL_MUTED_ERRORS_APP_DATA_GET = "call_muted_app_errors_data_get"
-    private const val CALL_APP_ERRORS_DATA_CLEAR = "call_app_errors_data_clear"
-    private const val CALL_UNMUTE_ALL_ERRORS_APPS_DATA = "call_unmute_all_errors_apps_data"
-    private const val CALL_APP_ERRORS_DATA_REMOVE_RESULT = "call_app_errors_data_remove_result"
-    private const val CALL_APP_ERRORS_DATA_CLEAR_RESULT = "call_app_errors_data_clear_result"
-    private const val CALL_MUTED_ERRORS_IF_UNLOCK_RESULT = "call_muted_errors_if_unlock_result"
-    private const val CALL_MUTED_ERRORS_IF_RESTART_RESULT = "call_muted_errors_if_restart_result"
-    private const val CALL_UNMUTE_ERRORS_APP_DATA_RESULT = "call_unmute_errors_app_data_result"
-    private const val CALL_UNMUTE_ALL_ERRORS_APPS_DATA_RESULT = "call_unmute_all_errors_apps_data_result"
-
-    private val CALL_APP_ERROR_DATA_GET = ChannelData<Int>("call_app_error_data_get")
-    private val CALL_OPEN_SPECIFY_APP = ChannelData<Pair<String, Int>>("call_open_specify_app")
-    private val CALL_APP_LIST_DATA_GET = ChannelData<AppFiltersBean>("call_app_info_list_data_get")
-    private val CALL_APP_ERRORS_DATA_REMOVE = ChannelData<AppErrorsInfoBean>("call_app_errors_data_remove")
-    private val CALL_APP_LIST_DATA_GET_RESULT = ChannelData<ArrayList<AppInfoBean>>("call_app_info_list_data_get_result")
-    private val CALL_APP_ERROR_DATA_GET_RESULT = ChannelData<AppErrorsInfoBean>("call_app_error_data_get_result")
-    private val CALL_APP_ERRORS_DATA_GET_RESULT = ChannelData<ArrayList<AppErrorsInfoBean>>("call_app_errors_data_get_result")
-    private val CALL_MUTED_ERRORS_APP_DATA_GET_RESULT = ChannelData<ArrayList<MutedErrorsAppBean>>("call_muted_app_errors_data_get_result")
-    private val CALL_UNMUTE_ERRORS_APP_DATA = ChannelData<MutedErrorsAppBean>("call_unmute_errors_app_data")
-    private val CALL_MUTED_ERRORS_IF_UNLOCK = ChannelData<String>("call_muted_errors_if_unlock")
-    private val CALL_MUTED_ERRORS_IF_RESTART = ChannelData<String>("call_muted_errors_if_restart")
-
-    /**
-     * 宿主注册监听
-     */
+    private val app = BuildConfigWrapper.APPLICATION_ID
+    private val permission = "$app.FRAMEWORK_ACCESS"
+    private val action = "$app.FRAMEWORK_BINDER"
+    private val descriptor = "$app.FrameworkRpc.v1"
+    private val gson = Gson()
+    private val worker = Executors.newSingleThreadExecutor()
+    private val main = Handler(Looper.getMainLooper())
+    @Volatile private var remote: IBinder? = null
+    val isModuleActive get() = remote?.isBinderAlive == true
+    val executorName = "libxposed API 102"
+    val executorVersion = "102"
+    private val handlers = mutableMapOf<String, (Bundle) -> Any?>()
     object Host {
-
-        /** [PackageParam] 实例 */
-        private var instance: PackageParam? = null
-
-        /**
-         * 注册监听
-         * @param instance 实例
-         * @param initiate 实例方法体
-         * @return [Host]
-         */
-        fun with(instance: PackageParam, initiate: Host.() -> Unit) = apply { this.instance = instance }.apply(initiate)
-
-        /**
-         * 通知系统框架刷新存储的数据
-         * @param callback 回调
-         */
-        fun onRefreshFrameworkPrefsData(callback: () -> Unit) = instance?.dataChannel?.wait(CALL_REFRESH_HOST_PREFS_DATA) { callback() }
-
-        /**
-         * 监听使用系统框架打开 APP
-         * @param result 回调包名和用户 ID
-         */
-        fun onOpenAppUsedFramework(result: (Pair<String, Int>) -> Unit) = instance?.dataChannel?.wait(CALL_OPEN_SPECIFY_APP) { result(it) }
-
-        /**
-         * 监听发送指定 APP 异常信息
-         * @param result 回调数据
-         */
-        fun onPushAppErrorInfoData(result: (Int) -> AppErrorsInfoBean) {
-            instance?.dataChannel?.with { wait(CALL_APP_ERROR_DATA_GET) { put(CALL_APP_ERROR_DATA_GET_RESULT, result(it)) } }
-        }
-
-        /**
-         * 监听发送 APP 异常信息数组
-         * @param result 回调数据
-         */
-        fun onPushAppErrorsInfoData(result: () -> ArrayList<AppErrorsInfoBean>) {
-            instance?.dataChannel?.with { wait(CALL_APP_ERRORS_DATA_GET) { put(CALL_APP_ERRORS_DATA_GET_RESULT, result()) } }
-        }
-
-        /**
-         * 监听移除指定 APP 异常信息
-         * @param result 回调数据
-         */
-        fun onRemoveAppErrorsInfoData(result: (AppErrorsInfoBean) -> Unit) {
-            instance?.dataChannel?.with {
-                wait(CALL_APP_ERRORS_DATA_REMOVE) {
-                    result(it)
-                    put(CALL_APP_ERRORS_DATA_REMOVE_RESULT)
+        fun with(context: Context, initiate: Host.() -> Unit) = apply {
+            initiate()
+            val binder = object : Binder() {
+                override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+                    if (code != FIRST_CALL_TRANSACTION) return super.onTransact(code, data, reply, flags)
+                    data.enforceInterface(descriptor)
+                    val uid = getCallingUid()
+                    val packages = context.packageManager.getPackagesForUid(uid)
+                    if (packages?.toSet() != setOf(app) || context.checkPermission(permission, getCallingPid(), uid) != PackageManager.PERMISSION_GRANTED)
+                        throw SecurityException("Framework RPC requires module identity")
+                    val request = data.readBundle(javaClass.classLoader) ?: Bundle()
+                    val identity = clearCallingIdentity()
+                    try {
+                        val op = request.getString("op") ?: "ping"
+                        val output = Bundle()
+                        if (op == "ping") output.putBoolean("active", true)
+                        else {
+                            val value = handlers[op]?.invoke(request)
+                            // Lists are exposed one entry at a time, never serialized as one large parcel.
+                            val index = request.getInt("index", -1)
+                            val list = value as? List<*>
+                            output.putInt("count", list?.size ?: -1)
+                            val element = if (list != null) list.getOrNull(index) else value
+                            val json = gson.toJson(element)
+                            val offset = request.getInt("offset", 0).coerceAtLeast(0)
+                            output.putInt("length", json.length)
+                            output.putString("json", if(offset < json.length) json.substring(offset, minOf(offset + 8192, json.length)) else "")
+                        }
+                        reply?.writeNoException(); reply?.writeBundle(output)
+                    } catch(t: Exception) { reply?.writeException(t) }
+                    finally { restoreCallingIdentity(identity) }
+                    return true
                 }
             }
-        }
-
-        /**
-         * 监听清空 APP 异常信息数组
-         * @param callback 回调
-         */
-        fun onClearAppErrorsInfoData(callback: () -> Unit) {
-            instance?.dataChannel?.with {
-                wait(CALL_APP_ERRORS_DATA_CLEAR) {
-                    callback()
-                    put(CALL_APP_ERRORS_DATA_CLEAR_RESULT)
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(c: Context, i: Intent) {
+                    // Only a small Binder capability is returned, never crash/log contents.
+                    setResultExtras(Bundle().apply { putBinder("binder", binder) })
                 }
             }
+            if(Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, IntentFilter(action), permission, main, Context.RECEIVER_EXPORTED)
+            else context.registerReceiver(receiver, IntentFilter(action), permission, main)
         }
-
-        /**
-         * 监听忽略 APP 的错误直到设备重新解锁
-         * @param result 回调包名
-         */
-        fun onMutedErrorsIfUnlock(result: (String) -> Unit) {
-            instance?.dataChannel?.with {
-                wait(CALL_MUTED_ERRORS_IF_UNLOCK) {
-                    result(it)
-                    put(CALL_MUTED_ERRORS_IF_UNLOCK_RESULT)
-                }
-            }
-        }
-
-        /**
-         * 监听忽略 APP 的错误直到设备重新启动
-         * @param result 回调包名
-         */
-        fun onMutedErrorsIfRestart(result: (String) -> Unit) {
-            instance?.dataChannel?.with {
-                wait(CALL_MUTED_ERRORS_IF_RESTART) {
-                    result(it)
-                    put(CALL_MUTED_ERRORS_IF_RESTART_RESULT)
-                }
-            }
-        }
-
-        /**
-         * 监听发送已忽略异常的 APP 信息数组
-         * @param result 回调数据
-         */
-        fun onPushMutedErrorsAppsData(result: () -> ArrayList<MutedErrorsAppBean>) {
-            instance?.dataChannel?.with { wait(CALL_MUTED_ERRORS_APP_DATA_GET) { put(CALL_MUTED_ERRORS_APP_DATA_GET_RESULT, result()) } }
-        }
-
-        /**
-         * 监听取消指定已忽略异常的 APP
-         * @param result 回调数据
-         */
-        fun onUnmuteErrorsApp(result: (MutedErrorsAppBean) -> Unit) {
-            instance?.dataChannel?.with {
-                wait(CALL_UNMUTE_ERRORS_APP_DATA) {
-                    result(it)
-                    put(CALL_UNMUTE_ERRORS_APP_DATA_RESULT)
-                }
-            }
-        }
-
-        /**
-         * 监听取消全部已忽略异常的 APP
-         * @param callback 回调
-         */
-        fun onUnmuteAllErrorsApps(callback: () -> Unit) {
-            instance?.dataChannel?.with {
-                wait(CALL_UNMUTE_ALL_ERRORS_APPS_DATA) {
-                    callback()
-                    put(CALL_UNMUTE_ALL_ERRORS_APPS_DATA_RESULT)
-                }
-            }
-        }
-
-        /**
-         * 监听发送已安装 APP 列表数组
-         * @param result 回调数据
-         */
-        fun onPushAppListData(result: (AppFiltersBean) -> ArrayList<AppInfoBean>) {
-            instance?.dataChannel?.with { wait(CALL_APP_LIST_DATA_GET) { put(CALL_APP_LIST_DATA_GET_RESULT, result(it)) } }
-        }
+        fun onRefreshFrameworkPrefsData(cb: () -> Unit) { handlers["refresh"] = { cb(); true } }
+        fun onOpenAppUsedFramework(cb: (Pair<String,Int>) -> Unit) { handlers["open"] = { cb(Pair(it.getString("package") ?: "",it.getInt("user"))); true } }
+        fun onPushAppErrorInfoData(cb: (Int)->AppErrorsInfoBean) { handlers["error"] = { cb(it.getInt("pid")) } }
+        fun onPushAppErrorsInfoData(cb: ()->ArrayList<AppErrorsInfoBean>) { handlers["errors"] = { cb() } }
+        fun onRemoveAppErrorsInfoData(cb: (AppErrorsInfoBean)->Unit) { handlers["remove"] = { b -> com.fankes.apperrorstracking.data.AppErrorsRecordData.allData.firstOrNull { it.pid == b.getInt("pid") && it.timestamp == b.getLong("timestamp") }?.let(cb); true } }
+        fun onClearAppErrorsInfoData(cb: ()->Unit) { handlers["clear"] = { cb(); true } }
+        fun onMutedErrorsIfUnlock(cb: (String)->Unit) { handlers["muteUnlock"] = { cb(it.getString("package") ?: ""); true } }
+        fun onMutedErrorsIfRestart(cb: (String)->Unit) { handlers["muteRestart"] = { cb(it.getString("package") ?: ""); true } }
+        fun onPushMutedErrorsAppsData(cb: ()->ArrayList<MutedErrorsAppBean>) { handlers["muted"] = { cb() } }
+        fun onUnmuteErrorsApp(cb: (MutedErrorsAppBean)->Unit) { handlers["unmute"] = { cb(gson.fromJson(it.getString("input"),MutedErrorsAppBean::class.java)); true } }
+        fun onUnmuteAllErrorsApps(cb: ()->Unit) { handlers["unmuteAll"] = { cb(); true } }
+        fun onPushAppListData(cb: (AppFiltersBean)->ArrayList<AppInfoBean>) { handlers["apps"] = { cb(gson.fromJson(it.getString("input"),AppFiltersBean::class.java)) } }
+        fun onPushLoggerData(cb: ()->ArrayList<AppLogData>) { handlers["logger"] = { cb() } }
     }
-
-    /**
-     * 重启系统
-     * @param context 实例
-     */
+    private fun connect(context: Context, done: (IBinder?)->Unit) {
+        remote?.takeIf { it.isBinderAlive }?.let { done(it); return }
+        context.sendOrderedBroadcast(Intent(action).setPackage("android"), null, object: BroadcastReceiver() {
+            override fun onReceive(c: Context,i: Intent) { val b=getResultExtras(false)?.getBinder("binder"); remote=b; done(b) }
+        }, main, 0, null, null)
+    }
+    private fun transact(b: IBinder, request: Bundle): Bundle {
+        val input=Parcel.obtain(); val output=Parcel.obtain()
+        try { input.writeInterfaceToken(descriptor); input.writeBundle(request); check(b.transact(IBinder.FIRST_CALL_TRANSACTION,input,output,0)); output.readException(); return output.readBundle(FrameworkTool::class.java.classLoader) ?: Bundle() }
+        finally { input.recycle(); output.recycle() }
+    }
+    private fun call(context: Context, op: String, input: Bundle=Bundle(), done: (IBinder,Bundle)->Unit) {
+        connect(context) { b -> if(b!=null) worker.execute { runCatching { input.putString("op",op); done(b,input) }.onFailure { remote=null; AppLog.error("Framework RPC failed: $op",it) } } }
+    }
+    private fun read(b: IBinder, request: Bundle): String {
+        val text=StringBuilder(); var offset=0
+        do { request.putInt("offset",offset); val response=transact(b,request); val chunk=response.getString("json") ?: ""; text.append(chunk); offset+=chunk.length; if(chunk.isEmpty() || offset>=response.getInt("length")) break } while(true)
+        return text.toString()
+    }
+    private fun <T> single(c: Context,op: String,input: Bundle,type: Class<T>,cb: (T)->Unit) = call(c,op,input) { b,r -> val value=gson.fromJson(read(b,r),type); main.post { cb(value) } }
+    private fun <T> list(c: Context,op: String,input: Bundle,type: Class<T>,cb: (ArrayList<T>)->Unit) = call(c,op,input) { b,r ->
+        r.putInt("index",-1); val count=transact(b,r).getInt("count").coerceAtLeast(0); val values=ArrayList<T>()
+        for(index in 0 until count) { r.putInt("index",index); val json=read(b,r); if(json!="null") values.add(gson.fromJson(json,type)) }
+        main.post { cb(values) }
+    }
+    private fun ack(c: Context,op: String,input: Bundle=Bundle(),cb: ()->Unit={}) = call(c,op,input) { b,r -> transact(b,r); main.post { cb() } }
+    fun checkingActivated(context: Context,result: (Boolean)->Unit) { connect(context) { b -> if(b==null) result(false) else worker.execute { val active=runCatching { transact(b,Bundle().apply { putString("op","ping") }).getBoolean("active") }.getOrDefault(false); main.post { result(active) } } } }
+    fun refreshFrameworkPrefsData(context: Context) = ack(context,"refresh")
+    fun openAppUsedFramework(context: Context,packageName: String,userId: Int) = ack(context,"open",Bundle().apply { putString("package",packageName); putInt("user",userId) })
+    fun fetchAppErrorInfoData(context: Context,pid: Int,result: (AppErrorsInfoBean)->Unit) = single(context,"error",Bundle().apply { putInt("pid",pid) },AppErrorsInfoBean::class.java,result)
+    fun fetchAppErrorsInfoData(context: Context,result: (ArrayList<AppErrorsInfoBean>)->Unit) = list(context,"errors",Bundle(),AppErrorsInfoBean::class.java,result)
+    fun removeAppErrorsInfoData(context: Context,appErrorsInfo: AppErrorsInfoBean,callback: ()->Unit) = ack(context,"remove",Bundle().apply { putInt("pid",appErrorsInfo.pid); putLong("timestamp",appErrorsInfo.timestamp) },callback)
+    fun clearAppErrorsInfoData(context: Context,callback: ()->Unit) = ack(context,"clear",cb=callback)
+    fun mutedErrorsIfUnlock(context: Context,packageName: String,callback: ()->Unit) = ack(context,"muteUnlock",Bundle().apply { putString("package",packageName) },callback)
+    fun mutedErrorsIfRestart(context: Context,packageName: String,callback: ()->Unit) = ack(context,"muteRestart",Bundle().apply { putString("package",packageName) },callback)
+    fun fetchMutedErrorsAppsData(context: Context,result: (ArrayList<MutedErrorsAppBean>)->Unit) = list(context,"muted",Bundle(),MutedErrorsAppBean::class.java,result)
+    fun unmuteErrorsApp(context: Context,mutedErrorsApp: MutedErrorsAppBean,callback: ()->Unit) = ack(context,"unmute",Bundle().apply { putString("input",gson.toJson(mutedErrorsApp)) },callback)
+    fun unmuteAllErrorsApps(context: Context,callback: ()->Unit) = ack(context,"unmuteAll",cb=callback)
+    fun fetchAppListData(context: Context,appFilters: AppFiltersBean,result: (ArrayList<AppInfoBean>)->Unit) = list(context,"apps",Bundle().apply { putString("input",gson.toJson(appFilters)) },AppInfoBean::class.java,result)
+    fun fetchLoggerData(context: Context,result: (ArrayList<AppLogData>)->Unit) = list(context,"logger",Bundle(),AppLogData::class.java,result)
     fun restartSystem(context: Context) {
-        /** 当 Root 权限获取失败时显示对话框 */
-        fun showWhenAccessRootFail() =
-            context.showDialog {
-                title = context.getString(R.string.access_root_fail)
-                msg = context.getString(R.string.access_root_fail_tip)
-                confirmButton(context.getString(R.string.got_it))
-            }
-        context.showDialog {
-            title = context.getString(R.string.notice)
-            msg = context.getString(R.string.are_your_sure_restart_system)
-            confirmButton {
-                if (isRootAccess)
-                    execShell(cmd = "reboot")
-                else showWhenAccessRootFail()
-            }
-            neutralButton(context.getString(R.string.fast_restart)) {
-                context.showDialog {
-                    title = context.getString(R.string.warning)
-                    msg = context.getString(R.string.fast_restart_problem)
-                    confirmButton {
-                        if (isRootAccess)
-                            execShell(cmd = "killall zygote")
-                        else showWhenAccessRootFail()
-                    }
-                    cancelButton()
-                }
-            }
-            cancelButton()
-        }
-    }
-
-    /**
-     * 检查模块是否激活
-     * @param context 实例
-     * @param result 成功后回调
-     */
-    fun checkingActivated(context: Context, result: (Boolean) -> Unit) =
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).checkingVersionEquals(result = result)
-
-    /**
-     * 通知系统框架刷新存储的数据
-     * @param context 实例
-     */
-    fun refreshFrameworkPrefsData(context: Context) = context.dataChannel(PackageName.SYSTEM_FRAMEWORK).put(CALL_REFRESH_HOST_PREFS_DATA)
-
-    /**
-     * 使用系统框架打开 [packageName]
-     * @param context 实例
-     * @param packageName APP 包名
-     * @param userId APP 用户 ID
-     */
-    fun openAppUsedFramework(context: Context, packageName: String, userId: Int) =
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).put(CALL_OPEN_SPECIFY_APP, Pair(packageName, userId))
-
-    /**
-     * 获取指定 APP 异常信息
-     * @param context 实例
-     * @param pid 当前进程 ID
-     * @param result 回调数据
-     */
-    fun fetchAppErrorInfoData(context: Context, pid: Int, result: (AppErrorsInfoBean) -> Unit) {
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).with {
-            wait(CALL_APP_ERROR_DATA_GET_RESULT) { result(it) }
-            put(CALL_APP_ERROR_DATA_GET, pid)
-        }
-    }
-
-    /**
-     * 获取 APP 异常信息数组
-     * @param context 实例
-     * @param result 回调数据
-     */
-    fun fetchAppErrorsInfoData(context: Context, result: (ArrayList<AppErrorsInfoBean>) -> Unit) {
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).with {
-            wait(CALL_APP_ERRORS_DATA_GET_RESULT) { result(it) }
-            put(CALL_APP_ERRORS_DATA_GET)
-        }
-    }
-
-    /**
-     * 移除指定 APP 异常信息
-     * @param context 实例
-     * @param appErrorsInfo 指定 APP 异常信息
-     * @param callback 成功后回调
-     */
-    fun removeAppErrorsInfoData(context: Context, appErrorsInfo: AppErrorsInfoBean, callback: () -> Unit) {
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).with {
-            wait(CALL_APP_ERRORS_DATA_REMOVE_RESULT) { callback() }
-            put(CALL_APP_ERRORS_DATA_REMOVE, appErrorsInfo)
-        }
-    }
-
-    /**
-     * 清空 APP 异常信息数组
-     * @param context 实例
-     * @param callback 成功后回调
-     */
-    fun clearAppErrorsInfoData(context: Context, callback: () -> Unit) {
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).with {
-            wait(CALL_APP_ERRORS_DATA_CLEAR_RESULT) { callback() }
-            put(CALL_APP_ERRORS_DATA_CLEAR)
-        }
-    }
-
-    /**
-     * 忽略 [packageName] 的错误直到设备重新解锁
-     * @param context 实例
-     * @param packageName APP 包名
-     * @param callback 成功后回调
-     */
-    fun mutedErrorsIfUnlock(context: Context, packageName: String, callback: () -> Unit) {
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).with {
-            wait(CALL_MUTED_ERRORS_IF_UNLOCK_RESULT) { callback() }
-            put(CALL_MUTED_ERRORS_IF_UNLOCK, packageName)
-        }
-    }
-
-    /**
-     * 忽略 [packageName] 的错误直到设备重新启动
-     * @param context 实例
-     * @param packageName APP 包名
-     * @param callback 成功后回调
-     */
-    fun mutedErrorsIfRestart(context: Context, packageName: String, callback: () -> Unit) {
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).with {
-            wait(CALL_MUTED_ERRORS_IF_RESTART_RESULT) { callback() }
-            put(CALL_MUTED_ERRORS_IF_RESTART, packageName)
-        }
-    }
-
-    /**
-     * 获取已忽略异常的 APP 信息数组
-     * @param context 实例
-     * @param result 回调数据
-     */
-    fun fetchMutedErrorsAppsData(context: Context, result: (ArrayList<MutedErrorsAppBean>) -> Unit) {
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).with {
-            wait(CALL_MUTED_ERRORS_APP_DATA_GET_RESULT) { result(it) }
-            put(CALL_MUTED_ERRORS_APP_DATA_GET)
-        }
-    }
-
-    /**
-     * 取消指定已忽略异常的 APP
-     * @param context 实例
-     * @param mutedErrorsApp 指定已忽略异常的 APP 信息
-     * @param callback 成功后回调
-     */
-    fun unmuteErrorsApp(context: Context, mutedErrorsApp: MutedErrorsAppBean, callback: () -> Unit) {
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).with {
-            wait(CALL_UNMUTE_ERRORS_APP_DATA_RESULT) { callback() }
-            put(CALL_UNMUTE_ERRORS_APP_DATA, mutedErrorsApp)
-        }
-    }
-
-    /**
-     * 取消全部已忽略异常的 APP
-     * @param context 实例
-     * @param callback 成功后回调
-     */
-    fun unmuteAllErrorsApps(context: Context, callback: () -> Unit) {
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).with {
-            wait(CALL_UNMUTE_ALL_ERRORS_APPS_DATA_RESULT) { callback() }
-            put(CALL_UNMUTE_ALL_ERRORS_APPS_DATA)
-        }
-    }
-
-    /**
-     * 获取已安装 APP 列表数组
-     * @param context 实例
-     * @param appFilters 过滤条件
-     * @param result 回调数据
-     */
-    fun fetchAppListData(context: Context, appFilters: AppFiltersBean, result: (ArrayList<AppInfoBean>) -> Unit) {
-        context.dataChannel(PackageName.SYSTEM_FRAMEWORK).with {
-            wait(CALL_APP_LIST_DATA_GET_RESULT) { result(it) }
-            put(CALL_APP_LIST_DATA_GET, appFilters)
-        }
-    }
+    
 }

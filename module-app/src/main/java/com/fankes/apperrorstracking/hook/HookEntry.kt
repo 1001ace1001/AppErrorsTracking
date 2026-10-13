@@ -20,29 +20,14 @@
  * This file is created by fankes on 2022/5/7.
  */
 package com.fankes.apperrorstracking.hook
-
-import com.fankes.apperrorstracking.data.ConfigData
+import io.github.libxposed.api.XposedModule
+import io.github.libxposed.api.XposedModuleInterface
+import com.fankes.apperrorstracking.hook.entity.FrameworkRuntime
 import com.fankes.apperrorstracking.hook.entity.FrameworkHooker
-import com.highcapable.yukihookapi.annotation.xposed.InjectYukiHookWithXposed
-import com.highcapable.yukihookapi.hook.factory.configs
-import com.highcapable.yukihookapi.hook.factory.encase
-import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
-
-@InjectYukiHookWithXposed(entryClassName = "AppErrorsTracking", isUsingResourcesHook = false)
-object HookEntry : IYukiHookXposedInit {
-
-    override fun onInit() = configs {
-        debugLog {
-            tag = "AppErrorsTracking"
-            isRecord = true
-        }
-        isDebug = false
-    }
-
-    override fun onHook() = encase {
-        loadSystem {
-            ConfigData.init(this)
-            loadHooker(FrameworkHooker)
-        }
+class HookEntry: XposedModule() {
+    override fun onSystemServerStarting(param: XposedModuleInterface.SystemServerStartingParam) {
+        FrameworkRuntime.module=this
+        FrameworkRuntime.loader=param.classLoader
+        FrameworkHooker.onHook()
     }
 }
