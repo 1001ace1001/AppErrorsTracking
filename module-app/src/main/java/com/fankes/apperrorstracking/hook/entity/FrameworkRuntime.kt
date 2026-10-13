@@ -39,8 +39,27 @@ object FrameworkRuntime {
     private val started=AtomicBoolean()
     fun initialize(c: Context) {
         if(!started.compareAndSet(false,true)) return
-        try { resources=c.createPackageContext(BuildConfigWrapper.APPLICATION_ID,0).resources; ConfigData.initFramework(module.getRemotePreferences("app_errors_tracking")); FrameworkHooker.initialize(c); context=c }
+        try { resources=c.createPackageContext(BuildConfigWrapper.APPLICATION_ID,0).resources; ConfigData.initFramework(remotePreferencesOrDefaults()); FrameworkHooker.initialize(c); context=c }
         catch(t: Throwable) { context=null; started.set(false); AppLog.error("System framework initialization failed",t) }
+    }
+    private fun remotePreferencesOrDefaults(): android.content.SharedPreferences {
+        return runCatching {
+            check(module.frameworkProperties and XposedInterface.PROP_CAP_REMOTE != 0L) { "Framework has no remote preferences capability" }
+            module.getRemotePreferences("app_errors_tracking")
+        }.getOrElse { AppLog.warn("Remote preferences unavailable, using safe defaults",it); EmptyPreferences }
+    }
+    private object EmptyPreferences: android.content.SharedPreferences {
+        override fun getAll(): MutableMap<String,*> = mutableMapOf<String,Any>()
+        override fun getString(key: String?,defValue: String?): String? = defValue
+        override fun getStringSet(key: String?,defValues: MutableSet<String>?): MutableSet<String>? = defValues?.toMutableSet()
+        override fun getInt(key: String?,defValue: Int)=defValue
+        override fun getLong(key: String?,defValue: Long)=defValue
+        override fun getFloat(key: String?,defValue: Float)=defValue
+        override fun getBoolean(key: String?,defValue: Boolean)=defValue
+        override fun contains(key: String?)=false
+        override fun edit(): android.content.SharedPreferences.Editor = throw UnsupportedOperationException("Framework preferences are read-only")
+        override fun registerOnSharedPreferenceChangeListener(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener?) {}
+        override fun unregisterOnSharedPreferenceChangeListener(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener?) {}
     }
     fun clazz(name: String): Class<*> = Class.forName(name,false,loader)
     fun lazyClass(name: String) = lazy { clazz(name) }

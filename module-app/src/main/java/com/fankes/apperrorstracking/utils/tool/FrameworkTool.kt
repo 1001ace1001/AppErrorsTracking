@@ -43,10 +43,52 @@ object FrameworkTool {
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var remote: IBinder? = null
-    val isModuleActive get() = remote?.isBinderAlive == true
+    @Volatile private var active = false
+    val isModuleActive get() = active && remote?.isBinderAlive == true
     val executorName = "libxposed API 102"
     val executorVersion = "102"
     private val handlers = mutableMapOf<String, (Bundle) -> Any?>()
+    private data class Snapshot(val uid: Int,val expires: Long,val values: List<String>,val count: Int)
+    private val snapshots=LinkedHashMap<String,Snapshot>()
+    private class LimitedWriter: java.io.Writer() {
+        private val text=StringBuilder()
+        override fun write(chars: CharArray,offset: Int,length: Int) { require(text.length+length <= 1048576) { "RPC entry exceeds size limit" }; text.append(chars,offset,length) }
+        override fun flush() {}
+        override fun close() {}
+        override fun toString()=text.toString()
+    }
+    private fun boundedJson(value: Any?): String { val writer=LimitedWriter(); gson.toJson(value,writer); return writer.toString() }
+    private fun snapshotResponse(uid: Int,request: Bundle): Bundle = synchronized(snapshots) {
+        val now=SystemClock.elapsedRealtime()
+        snapshots.entries.removeAll { it.value.expires<=now }
+        val mode=request.getString("mode") ?: "begin"
+        if(mode=="release") { val token=request.getString("token"); snapshots[token]?.let { require(it.uid==uid); snapshots.remove(token) }; return@synchronized Bundle() }
+        val token: String
+        val snapshot: Snapshot
+        if(mode=="begin") {
+            val op=requireNotNull(request.getString("op"))
+            val handler=handlers[op] ?: throw IllegalArgumentException("Unknown framework operation: $op")
+            require(snapshots.size<8 && snapshots.values.count { it.uid==uid }<4) { "Too many diagnostic snapshots" }
+            val value=handler(request)
+            val list=value as? List<*>
+            require((list?.size ?: 1)<=10000) { "Diagnostic list exceeds limit" }
+            var budget=snapshots.values.sumOf { it.values.sumOf { text -> text.length } }
+            val values=(list ?: listOf(value)).map { item -> val json=boundedJson(item); budget+=json.length; require(budget<=4194304) { "Diagnostic snapshot exceeds memory budget" }; json }
+            token=java.util.UUID.randomUUID().toString()
+            snapshot=Snapshot(uid,now+30000,values,list?.size ?: -1)
+            snapshots[token]=snapshot
+        } else {
+            require(mode=="read") { "Unknown snapshot mode" }
+            token=requireNotNull(request.getString("token"))
+            snapshot=snapshots[token] ?: throw IllegalStateException("Diagnostic snapshot expired")
+            require(snapshot.uid==uid) { "Snapshot identity mismatch" }
+        }
+        val index=if(snapshot.count<0) 0 else request.getInt("index",-1)
+        val json=snapshot.values.getOrNull(index) ?: "null"
+        val offset=request.getInt("offset",0)
+        require(offset>=0 && offset<=json.length) { "Invalid chunk offset" }
+        Bundle().apply { putString("token",token); putInt("count",snapshot.count); putInt("length",json.length); putString("json",json.substring(offset,minOf(offset+8192,json.length))) }
+    }
     object Host {
         fun with(context: Context, initiate: Host.() -> Unit) = apply {
             initiate()
@@ -65,16 +107,7 @@ object FrameworkTool {
                         val output = Bundle()
                         if (op == "ping") output.putBoolean("active", true)
                         else {
-                            val value = handlers[op]?.invoke(request)
-                            // Lists are exposed one entry at a time, never serialized as one large parcel.
-                            val index = request.getInt("index", -1)
-                            val list = value as? List<*>
-                            output.putInt("count", list?.size ?: -1)
-                            val element = if (list != null) list.getOrNull(index) else value
-                            val json = gson.toJson(element)
-                            val offset = request.getInt("offset", 0).coerceAtLeast(0)
-                            output.putInt("length", json.length)
-                            output.putString("json", if(offset < json.length) json.substring(offset, minOf(offset + 8192, json.length)) else "")
+                            output.putAll(snapshotResponse(uid,request))
                         }
                         reply?.writeNoException(); reply?.writeBundle(output)
                     } catch(t: Exception) { reply?.writeException(t) }
@@ -107,9 +140,12 @@ object FrameworkTool {
     }
     private fun connect(context: Context, done: (IBinder?)->Unit) {
         remote?.takeIf { it.isBinderAlive }?.let { done(it); return }
-        context.sendOrderedBroadcast(Intent(action).setPackage("android"), null, object: BroadcastReceiver() {
-            override fun onReceive(c: Context,i: Intent) { val b=getResultExtras(false)?.getBinder("binder"); remote=b; done(b) }
-        }, main, 0, null, null)
+        val delivered=java.util.concurrent.atomic.AtomicBoolean()
+        fun complete(b: IBinder?) { if(delivered.compareAndSet(false,true)) { remote=b; if(b==null) active=false; done(b) } }
+        main.postDelayed({ complete(null) },5000)
+        try { context.sendOrderedBroadcast(Intent(action).setPackage("android"), null, object: BroadcastReceiver() {
+            override fun onReceive(c: Context,i: Intent) { complete(getResultExtras(false)?.getBinder("binder")) }
+        }, main, 0, null, null) } catch(t: Exception) { AppLog.error("Framework discovery failed",t); complete(null) }
     }
     private fun transact(b: IBinder, request: Bundle): Bundle {
         val input=Parcel.obtain(); val output=Parcel.obtain()
@@ -117,21 +153,27 @@ object FrameworkTool {
         finally { input.recycle(); output.recycle() }
     }
     private fun call(context: Context, op: String, input: Bundle=Bundle(), done: (IBinder,Bundle)->Unit) {
-        connect(context) { b -> if(b!=null) worker.execute { runCatching { input.putString("op",op); done(b,input) }.onFailure { remote=null; AppLog.error("Framework RPC failed: $op",it) } } }
+        connect(context) { b -> if(b!=null) worker.execute { runCatching { input.putString("op",op); done(b,input) }.onFailure { remote=null; active=false; AppLog.error("Framework RPC failed: $op",it) } } }
     }
-    private fun read(b: IBinder, request: Bundle): String {
-        val text=StringBuilder(); var offset=0
-        do { request.putInt("offset",offset); val response=transact(b,request); val chunk=response.getString("json") ?: ""; text.append(chunk); offset+=chunk.length; if(chunk.isEmpty() || offset>=response.getInt("length")) break } while(true)
+    private fun release(b: IBinder,token: String?) { if(token!=null) runCatching { transact(b,Bundle().apply { putString("op","release"); putString("mode","release"); putString("token",token) }) } }
+    private fun read(b: IBinder,request: Bundle,first: Bundle?=null): String {
+        val text=StringBuilder(); var response=first ?: transact(b,request)
+        do { val chunk=response.getString("json") ?: ""; text.append(chunk); if(text.length>=response.getInt("length")) break; check(chunk.isNotEmpty()); request.putInt("offset",text.length); response=transact(b,request) } while(true)
         return text.toString()
     }
-    private fun <T> single(c: Context,op: String,input: Bundle,type: Class<T>,cb: (T)->Unit) = call(c,op,input) { b,r -> val value=gson.fromJson(read(b,r),type); main.post { cb(value) } }
-    private fun <T> list(c: Context,op: String,input: Bundle,type: Class<T>,cb: (ArrayList<T>)->Unit) = call(c,op,input) { b,r ->
-        r.putInt("index",-1); val count=transact(b,r).getInt("count").coerceAtLeast(0); val values=ArrayList<T>()
-        for(index in 0 until count) { r.putInt("index",index); val json=read(b,r); if(json!="null") values.add(gson.fromJson(json,type)) }
-        main.post { cb(values) }
+    private fun <T> single(c: Context,op: String,input: Bundle,type: Class<T>,cb: (T)->Unit) = call(c,op,input) { b,r ->
+        var token: String?=null
+        try { val first=transact(b,r); token=first.getString("token"); r.putString("token",token); r.putString("mode","read"); val value=gson.fromJson(read(b,r,first),type); main.post { cb(value) } } finally { release(b,token) }
     }
-    private fun ack(c: Context,op: String,input: Bundle=Bundle(),cb: ()->Unit={}) = call(c,op,input) { b,r -> transact(b,r); main.post { cb() } }
-    fun checkingActivated(context: Context,result: (Boolean)->Unit) { connect(context) { b -> if(b==null) result(false) else worker.execute { val active=runCatching { transact(b,Bundle().apply { putString("op","ping") }).getBoolean("active") }.getOrDefault(false); main.post { result(active) } } } }
+    private fun <T> list(c: Context,op: String,input: Bundle,type: Class<T>,cb: (ArrayList<T>)->Unit) = call(c,op,input) { b,r ->
+        var token: String?=null
+        try { r.putInt("index",-1); val first=transact(b,r); token=first.getString("token"); r.putString("token",token); r.putString("mode","read"); val count=first.getInt("count").coerceAtLeast(0); val values=ArrayList<T>()
+            for(index in 0 until count) { r.putInt("index",index); r.putInt("offset",0); val json=read(b,r); if(json!="null") values.add(gson.fromJson(json,type)) }
+            main.post { cb(values) }
+        } finally { release(b,token) }
+    }
+    private fun ack(c: Context,op: String,input: Bundle=Bundle(),cb: ()->Unit={}) = call(c,op,input) { b,r -> val response=transact(b,r); release(b,response.getString("token")); main.post { cb() } }
+    fun checkingActivated(context: Context,result: (Boolean)->Unit) { connect(context) { b -> if(b==null) { active=false; result(false) } else worker.execute { val success=runCatching { transact(b,Bundle().apply { putString("op","ping") }).getBoolean("active") }.getOrDefault(false); active=success; if(!success) remote=null; main.post { result(success) } } } }
     fun refreshFrameworkPrefsData(context: Context) = ack(context,"refresh")
     fun openAppUsedFramework(context: Context,packageName: String,userId: Int) = ack(context,"open",Bundle().apply { putString("package",packageName); putInt("user",userId) })
     fun fetchAppErrorInfoData(context: Context,pid: Int,result: (AppErrorsInfoBean)->Unit) = single(context,"error",Bundle().apply { putInt("pid",pid) },AppErrorsInfoBean::class.java,result)
