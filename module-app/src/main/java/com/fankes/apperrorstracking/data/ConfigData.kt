@@ -24,11 +24,10 @@
 package com.fankes.apperrorstracking.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
-import com.highcapable.yukihookapi.hook.factory.prefs
-import com.highcapable.yukihookapi.hook.log.YLog
-import com.highcapable.yukihookapi.hook.param.PackageParam
-import com.highcapable.yukihookapi.hook.xposed.prefs.data.PrefsData
+import com.fankes.apperrorstracking.utils.tool.AppLog
+import com.fankes.apperrorstracking.data.ConfigKey
 
 /**
  * 全局配置存储控制类
@@ -36,120 +35,82 @@ import com.highcapable.yukihookapi.hook.xposed.prefs.data.PrefsData
 object ConfigData {
 
     /** 显示开发者提示 */
-    val SHOW_DEVELOPER_NOTICE = PrefsData("_show_developer_notice", true)
+    val SHOW_DEVELOPER_NOTICE = ConfigKey("_show_developer_notice", true)
 
     /** 启用 Material 3 风格的错误对话框 */
-    val ENABLE_MATERIAL3_STYLE_APP_ERRORS_DIALOG = PrefsData("_enable_material3_style_dialog", Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+    val ENABLE_MATERIAL3_STYLE_APP_ERRORS_DIALOG = ConfigKey("_enable_material3_style_dialog", Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
 
     /** 仅对前台应用显示错误对话框 */
-    val ENABLE_ONLY_SHOW_ERRORS_IN_FRONT = PrefsData("_enable_only_show_errors_in_front", false)
+    val ENABLE_ONLY_SHOW_ERRORS_IN_FRONT = ConfigKey("_enable_only_show_errors_in_front", false)
 
     /** 仅对应用主进程显示错误对话框 */
-    val ENABLE_ONLY_SHOW_ERRORS_IN_MAIN = PrefsData("_enable_only_show_errors_in_main", false)
+    val ENABLE_ONLY_SHOW_ERRORS_IN_MAIN = ConfigKey("_enable_only_show_errors_in_main", false)
 
     /** 错误对话框始终显示“重新打开”选项 */
-    val ENABLE_ALWAYS_SHOWS_REOPEN_APP_OPTIONS = PrefsData("_enable_always_shows_reopen_app_options", false)
+    val ENABLE_ALWAYS_SHOWS_REOPEN_APP_OPTIONS = ConfigKey("_enable_always_shows_reopen_app_options", false)
 
     /** 启用应用配置模板 */
-    val ENABLE_APP_CONFIG_TEMPLATE = PrefsData("_enable_app_config_template", false)
+    val ENABLE_APP_CONFIG_TEMPLATE = ConfigKey("_enable_app_config_template", false)
 
     /** 启用对话框防误触 */
-    val ENABLE_PREVENT_MISOPERATION_FOR_DIALOG = PrefsData("_enable_prevent_misoperation_for_dialog", false)
+    val ENABLE_PREVENT_MISOPERATION_FOR_DIALOG = ConfigKey("_enable_prevent_misoperation_for_dialog", false)
 
     /** 禁止异常堆栈内容自动换行 */
-    val DISABLE_AUTO_WRAP_ERROR_STACK_TRACE = PrefsData("_disable_auto_wrap_error_stack_trace", false)
+    val DISABLE_AUTO_WRAP_ERROR_STACK_TRACE = ConfigKey("_disable_auto_wrap_error_stack_trace", false)
 
     /** 分享时使用文件 */
-    val SHARE_WITH_FILE = PrefsData("_share_with_file", false)
+    val SHARE_WITH_FILE = ConfigKey("_share_with_file", false)
 
-    /** 当前实例 - [Context] or [PackageParam] */
-    private var instance: Any? = null
-
-    /**
-     * 初始化存储控制类
-     * @param instance 实例 - 只能是 [Context] or [PackageParam]
-     * @throws IllegalStateException 如果类型错误
-     */
-    fun init(instance: Any) {
-        when (instance) {
-            is Context, is PackageParam -> this.instance = instance
-            else -> error("Unknown type for init ConfigData")
+    const val PREFERENCE_GROUP = "app_errors_tracking"
+    private const val MIGRATED = "_api102_migrated"
+    private var preferences: SharedPreferences? = null
+    var isFramework = false
+        private set
+    val isPreferencesAvailable get() = preferences != null
+    fun init(context: Context) = initApp(context)
+    fun initApp(context: Context) {
+        isFramework = false
+        val target = context.getSharedPreferences(PREFERENCE_GROUP, Context.MODE_PRIVATE)
+        // YukiHookPrefsBridge.currentPrefsName defaults to modulePackageName + "_preferences".
+        // Copy missing values only; retain the legacy store intact for rollback.
+        if (!target.getBoolean(MIGRATED, false)) {
+            val legacy = context.getSharedPreferences(context.packageName + "_preferences", Context.MODE_PRIVATE)
+            val editor = target.edit()
+            legacy.all.forEach { (key, value) ->
+                if (!target.contains(key)) putValue(editor, key, value)
+            }
+            check(editor.putBoolean(MIGRATED, true).commit()) { "Legacy preferences migration failed" }
         }
+        preferences = target
+        AppErrorsConfigData.refresh()
+        PreferenceMirror.start(target)
+    }
+    fun initFramework(shared: SharedPreferences) {
+        isFramework = true
+        preferences = shared
         AppErrorsConfigData.refresh()
     }
-
-    /**
-     * 读取 [Set]<[String]> 数据
-     * @param key 键值名称
-     * @return [Set]<[String]>
-     */
-    internal fun getStringSet(key: String) = when (instance) {
-        is Context -> (instance as Context).prefs().getStringSet(key, setOf())
-        is PackageParam -> (instance as PackageParam).prefs.getStringSet(key, setOf())
-        else -> error("Unknown type for get prefs data")
+    private fun store() = preferences ?: error("ConfigData not initialized")
+    private fun edit(block: (SharedPreferences.Editor) -> Unit) {
+        if (isFramework) { AppLog.warn("Framework preferences are read-only"); return }
+        store().edit().also(block).apply()
     }
-
-    /**
-     * 存入 [Set]<[String]> 数据
-     * @param key 键值名称
-     * @param value 键值内容
-     */
-    internal fun putStringSet(key: String, value: Set<String>) {
-        when (instance) {
-            is Context -> (instance as Context).prefs().edit { putStringSet(key, value) }
-            is PackageParam -> YLog.warn("Not support for this method")
-            else -> error("Unknown type for put prefs data")
+    internal fun getStringSet(key: String): Set<String> = store().getStringSet(key, emptySet())?.toSet() ?: emptySet()
+    internal fun putStringSet(key: String, value: Set<String>) = edit { it.putStringSet(key, value.toSet()) }
+    internal fun getInt(data: ConfigKey<Int>) = store().getInt(data.key, data.default)
+    internal fun putInt(data: ConfigKey<Int>, value: Int) = edit { it.putInt(data.key, value) }
+    internal fun getBoolean(data: ConfigKey<Boolean>) = store().getBoolean(data.key, data.default)
+    internal fun putBoolean(data: ConfigKey<Boolean>, value: Boolean) = edit { it.putBoolean(data.key, value) }
+    internal fun putValue(editor: SharedPreferences.Editor, key: String, value: Any?) {
+        when (value) {
+            is Boolean -> editor.putBoolean(key, value)
+            is Int -> editor.putInt(key, value)
+            is Long -> editor.putLong(key, value)
+            is Float -> editor.putFloat(key, value)
+            is String -> editor.putString(key, value)
+            is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
         }
     }
-
-    /**
-     * 读取 [Int] 数据
-     * @param data 键值数据模板
-     * @return [Int]
-     */
-    internal fun getInt(data: PrefsData<Int>) = when (instance) {
-        is Context -> (instance as Context).prefs().get(data)
-        is PackageParam -> (instance as PackageParam).prefs.get(data)
-        else -> error("Unknown type for get prefs data")
-    }
-
-    /**
-     * 存入 [Int] 数据
-     * @param data 键值数据模板
-     * @param value 键值内容
-     */
-    internal fun putInt(data: PrefsData<Int>, value: Int) {
-        when (instance) {
-            is Context -> (instance as Context).prefs().edit { put(data, value) }
-            is PackageParam -> YLog.warn("Not support for this method")
-            else -> error("Unknown type for put prefs data")
-        }
-    }
-
-    /**
-     * 读取 [Boolean] 数据
-     * @param data 键值数据模板
-     * @return [Boolean]
-     */
-    internal fun getBoolean(data: PrefsData<Boolean>) = when (instance) {
-        is Context -> (instance as Context).prefs().get(data)
-        is PackageParam -> (instance as PackageParam).prefs.get(data)
-        else -> error("Unknown type for get prefs data")
-    }
-
-    /**
-     * 存入 [Boolean] 数据
-     * @param data 键值数据模板
-     * @param value 键值内容
-     */
-    internal fun putBoolean(data: PrefsData<Boolean>, value: Boolean) {
-        when (instance) {
-            is Context -> (instance as Context).prefs().edit { put(data, value) }
-            is PackageParam -> YLog.warn("Not support for this method")
-            else -> error("Unknown type for put prefs data")
-        }
-    }
-
     /**
      * 是否显示开发者提示
      * @return [Boolean]

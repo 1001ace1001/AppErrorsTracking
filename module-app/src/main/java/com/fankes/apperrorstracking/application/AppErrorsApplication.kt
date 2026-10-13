@@ -24,16 +24,16 @@ package com.fankes.apperrorstracking.application
 import androidx.appcompat.app.AppCompatDelegate
 import com.fankes.apperrorstracking.data.ConfigData
 import com.fankes.apperrorstracking.utils.tool.AppAnalyticsTool
-import com.highcapable.yukihookapi.hook.xposed.application.ModuleApplication
+import android.app.Application
 
-class AppErrorsApplication : ModuleApplication() {
+class AppErrorsApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
         /** 跟随系统夜间模式 */
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
         /** 装载存储控制类 */
-        ConfigData.init(this)
+        ConfigData.initApp(this)
         /** 装载 App Center */
         AppAnalyticsTool.init(this)
     }

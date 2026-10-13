@@ -47,7 +47,6 @@ import com.fankes.apperrorstracking.utils.tool.FrameworkTool
 import com.fankes.apperrorstracking.utils.tool.GithubReleaseTool
 import com.fankes.projectpromote.ProjectPromote
 import com.highcapable.betterandroid.ui.extension.view.isUnderline
-import com.highcapable.yukihookapi.YukiHookAPI
 
 class MainActivity : BaseActivity<ActivityMainBinding>() {
 
@@ -71,7 +70,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>() {
             }
         }
         /** 推广、恰饭 */
-        if (YukiHookAPI.Status.isXposedModuleActive) ProjectPromote.show(activity = this, ModuleVersion.toString())
+        if (FrameworkTool.isModuleActive) ProjectPromote.show(activity = this, ModuleVersion.toString())
         /** 显示开发者提示 */
         if (ConfigData.isShowDeveloperNotice)
             showDialog {
@@ -146,24 +145,24 @@ class MainActivity : BaseActivity<ActivityMainBinding>() {
     private fun refreshModuleStatus() {
         binding.mainLinStatus.setBackgroundResource(
             when {
-                YukiHookAPI.Status.isXposedModuleActive && isModuleValied.not() -> R.drawable.bg_yellow_round
-                YukiHookAPI.Status.isXposedModuleActive -> R.drawable.bg_green_round
+                FrameworkTool.isModuleActive && isModuleValied.not() -> R.drawable.bg_yellow_round
+                FrameworkTool.isModuleActive -> R.drawable.bg_green_round
                 else -> R.drawable.bg_dark_round
             }
         )
         binding.mainImgStatus.setImageResource(
             when {
-                YukiHookAPI.Status.isXposedModuleActive -> R.drawable.ic_success
+                FrameworkTool.isModuleActive -> R.drawable.ic_success
                 else -> R.drawable.ic_warn
             }
         )
         binding.mainTextStatus.text = when {
-            YukiHookAPI.Status.isXposedModuleActive && isModuleValied.not() -> getString(R.string.module_not_fully_activated)
-            YukiHookAPI.Status.isXposedModuleActive -> getString(R.string.module_is_activated)
+            FrameworkTool.isModuleActive && isModuleValied.not() -> getString(R.string.module_not_fully_activated)
+            FrameworkTool.isModuleActive -> getString(R.string.module_is_activated)
             else -> getString(R.string.module_not_activated)
         }
-        binding.mainTextApiWay.isVisible = YukiHookAPI.Status.isXposedModuleActive
-        binding.mainTextApiWay.text = "Activated by ${YukiHookAPI.Status.Executor.name} API ${YukiHookAPI.Status.Executor.apiLevel}"
+        binding.mainTextApiWay.isVisible = FrameworkTool.isModuleActive
+        binding.mainTextApiWay.text = "Activated by ${FrameworkTool.executorName} API ${FrameworkTool.executorVersion}"
     }
 
     /**
@@ -171,7 +170,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>() {
      * @param callback 激活后回调
      */
     private inline fun whenActivated(callback: () -> Unit) {
-        if (YukiHookAPI.Status.isXposedModuleActive) callback() else toast(getString(R.string.module_not_activated))
+        if (FrameworkTool.isModuleActive) callback() else toast(getString(R.string.module_not_activated))
     }
 
     override fun onResume() {

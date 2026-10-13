@@ -42,9 +42,6 @@ import com.fankes.apperrorstracking.data.ConfigData
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.progressindicator.CircularProgressIndicator
 import com.google.android.material.shape.MaterialShapeDrawable
-import com.highcapable.yukihookapi.YukiHookAPI
-import com.highcapable.yukihookapi.hook.factory.method
-import com.highcapable.yukihookapi.hook.type.android.LayoutInflaterClass
 
 /**
  * 构造 [VB] 自定义 View 对话框
@@ -94,16 +91,13 @@ class DialogBuilder<VB : ViewBinding>(
      * @return [VB]
      */
     val binding by lazy {
-        bindingClass?.method {
-            name = "inflate"
-            param(LayoutInflaterClass)
-        }?.get()?.invoke<VB>(LayoutInflater.from(context))?.apply {
+        (bindingClass?.getMethod("inflate", LayoutInflater::class.java)?.invoke(null, LayoutInflater.from(context)) as? VB)?.apply {
             customLayoutView = root
         } ?: error("This dialog maybe not a custom view dialog")
     }
 
     init {
-        if (YukiHookAPI.Status.isXposedEnvironment) error("This dialog is not allowed to created in Xposed environment")
+        if (ConfigData.isFramework) error("This dialog is not allowed to created in Xposed environment")
         instance = MaterialAlertDialogBuilder(context).also { builder ->
             if (isDisableMaterial3)
                 builder.background = (builder.background as? MaterialShapeDrawable)?.apply { setCornerSize(15.dpFloat(context)) }

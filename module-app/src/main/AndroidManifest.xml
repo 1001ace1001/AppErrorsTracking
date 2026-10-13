@@ -31,13 +31,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AppErrorsTracking"
         tools:targetApi="tiramisu">
-
-<meta-data
-            android:name="xposeddescription"
-            android:value="@string/xposed_desc" />
-<meta-data
-            android:name="xposedsharedprefs"
-            android:value="true" />
 <activity
             android:name=".ui.activity.main.MainActivity"
             android:exported="true"

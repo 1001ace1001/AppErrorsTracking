@@ -46,7 +46,7 @@ import com.fankes.apperrorstracking.utils.factory.openSelfSetting
 import com.fankes.apperrorstracking.utils.factory.showDialog
 import com.fankes.apperrorstracking.utils.factory.toast
 import com.fankes.apperrorstracking.utils.tool.StackTraceShareHelper
-import com.highcapable.yukihookapi.hook.log.loggerE
+import com.fankes.apperrorstracking.utils.tool.AppLog
 import java.io.File
 
 class AppErrorsDetailActivity : BaseActivity<ActivityAppErrorsDetailBinding>() {
@@ -120,7 +120,7 @@ class AppErrorsDetailActivity : BaseActivity<ActivityAppErrorsDetailBinding>() {
         }
         binding.appInfoItem.setOnClickListener { openSelfSetting(appErrorsInfo.packageName) }
         binding.printIcon.setOnClickListener {
-            loggerE(msg = appErrorsInfo.stackTrace)
+            AppLog.error(msg = appErrorsInfo.stackTrace)
             toast(getString(R.string.print_to_logcat_success))
         }
         binding.copyIcon.setOnClickListener {

@@ -40,9 +40,9 @@ import com.fankes.apperrorstracking.utils.factory.copyToClipboard
 import com.fankes.apperrorstracking.utils.factory.showDialog
 import com.fankes.apperrorstracking.utils.factory.toUtcTime
 import com.fankes.apperrorstracking.utils.factory.toast
-import com.highcapable.yukihookapi.hook.factory.dataChannel
-import com.highcapable.yukihookapi.hook.log.YLog
-import com.highcapable.yukihookapi.hook.log.data.YLogData
+import com.fankes.apperrorstracking.utils.tool.AppLog
+import com.fankes.apperrorstracking.utils.tool.AppLogData
+import com.fankes.apperrorstracking.utils.tool.FrameworkTool
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
 import java.text.SimpleDateFormat
@@ -63,7 +63,7 @@ class LoggerActivity : BaseActivity<ActivitiyLoggerBinding>() {
     private var filters = arrayListOf("D", "I", "W", "E")
 
     /** 全部的调试日志数据 */
-    private val listData = mutableListOf<YLogData>()
+    private val listData = mutableListOf<AppLogData>()
 
     override fun onCreate() {
         binding.titleBackIcon.setOnClickListener { finish() }
@@ -115,8 +115,8 @@ class LoggerActivity : BaseActivity<ActivitiyLoggerBinding>() {
                         }
                         binding.messageText.text = bean.msg.format()
                         binding.timeText.text = bean.timestamp.format()
-                        binding.throwableText.isVisible = bean.throwable != null
-                        binding.throwableText.text = bean.throwable?.toStackTrace() ?: ""
+                        binding.throwableText.isVisible = bean.stackTrace != null
+                        binding.throwableText.text = bean.stackTrace ?: ""
                     }
                 }
             }.apply { onChanged = { notifyDataSetChanged() } }
@@ -126,7 +126,7 @@ class LoggerActivity : BaseActivity<ActivitiyLoggerBinding>() {
 
     /** 更新列表数据 */
     private fun refreshData() {
-        dataChannel(PackageName.SYSTEM_FRAMEWORK).obtainLoggerInMemoryData { logData ->
+        FrameworkTool.fetchLoggerData(this) { logData ->
             listData.clear()
             logData.takeIf { e -> e.isNotEmpty() }?.reversed()?.filter { filters.any { e -> it.priority == e } }?.forEach { e -> listData.add(e) }
             onChanged?.invoke()
@@ -167,7 +167,7 @@ class LoggerActivity : BaseActivity<ActivitiyLoggerBinding>() {
         if (item.menuInfo is AdapterView.AdapterContextMenuInfo)
             (item.menuInfo as? AdapterView.AdapterContextMenuInfo?)?.also {
                 if (item.itemId == R.id.logger_copy)
-                    copyToClipboard(listData[it.position].let { e -> e.toString() + (e.throwable?.toStackTrace()?.let { t -> "\n$t" } ?: "") })
+                    copyToClipboard(listData[it.position].let { e -> e.toString() + (e.stackTrace?.let { t -> "\n$t" } ?: "") })
             }
         return super.onContextItemSelected(item)
     }
@@ -176,7 +176,7 @@ class LoggerActivity : BaseActivity<ActivitiyLoggerBinding>() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == WRITE_REQUEST_CODE && resultCode == RESULT_OK) runCatching {
             data?.data?.let {
-                contentResolver?.openOutputStream(it)?.apply { write(YLog.contents(listData).toByteArray()) }?.close()
+                contentResolver?.openOutputStream(it)?.apply { write(AppLog.contents(listData).toByteArray()) }?.close()
                 toast(getString(R.string.export_all_logs_success))
             } ?: toast(getString(R.string.export_all_logs_fail))
         }.onFailure { toast(getString(R.string.export_all_logs_fail)) }

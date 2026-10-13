@@ -54,13 +54,7 @@ import androidx.core.graphics.drawable.IconCompat
 import com.fankes.apperrorstracking.R
 import com.fankes.apperrorstracking.wrapper.BuildConfigWrapper
 import com.google.android.material.snackbar.Snackbar
-import com.highcapable.yukihookapi.hook.factory.field
-import com.highcapable.yukihookapi.hook.factory.method
-import com.highcapable.yukihookapi.hook.log.YLog
-import com.highcapable.yukihookapi.hook.type.android.ApplicationInfoClass
-import com.highcapable.yukihookapi.hook.type.android.ContextClass
-import com.highcapable.yukihookapi.hook.type.android.IntentClass
-import com.highcapable.yukihookapi.hook.type.android.UserHandleClass
+import com.fankes.apperrorstracking.utils.tool.AppLog
 import com.topjohnwu.superuser.Shell
 import java.io.Serializable
 import java.math.RoundingMode
@@ -199,7 +193,7 @@ fun Context.appMinSdkOf(packageName: String = getPackageName()) = getPackageInfo
  * @return [String] 无法获取时返回 ""
  */
 fun Context.appCpuAbiOf(packageName: String = getPackageName()) = runCatching {
-    ApplicationInfoClass.field { name = "primaryCpuAbi" }.get(getPackageInfoCompat(packageName)?.applicationInfo).string()
+    android.content.pm.ApplicationInfo::class.java.getDeclaredField("primaryCpuAbi").apply { isAccessible = true }.get(getPackageInfoCompat(packageName)?.applicationInfo) as? String
 }.getOrNull() ?: ""
 
 /**
@@ -290,7 +284,7 @@ fun Long.toUtcTime() = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.ROOT
 fun Context.toast(msg: String) {
     runCatching {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-    }.onFailure { YLog.warn(msg) }
+    }.onFailure { AppLog.warn(msg) }
 }
 
 /**
@@ -404,10 +398,9 @@ fun Context.isAppCanOpened(packageName: String = this.packageName) =
  * @param userId APP 用户 ID - 默认 0
  */
 fun Context.openApp(packageName: String = getPackageName(), userId: Int = 0) = runCatching {
-    ContextClass.method {
-        name = "startActivityAsUser"
-        param(IntentClass, UserHandleClass)
-    }.get(this).call(packageManager.getLaunchIntentForPackage(packageName), UserHandleClass.method { name = "of" }.get().call(userId))
+    val userClass = Class.forName("android.os.UserHandle")
+    val user = userClass.getDeclaredMethod("of", Int::class.javaPrimitiveType).invoke(null, userId)
+    Context::class.java.getMethod("startActivityAsUser", Intent::class.java, userClass).invoke(this, packageManager.getLaunchIntentForPackage(packageName), user)
 }.onFailure { toast(msg = "Cannot start \"$packageName\"${if (userId > 0) " for user $userId" else ""}") }
 
 /**
