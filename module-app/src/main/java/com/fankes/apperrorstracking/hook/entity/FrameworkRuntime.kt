@@ -39,7 +39,7 @@ object FrameworkRuntime {
     private val started=AtomicBoolean()
     fun initialize(c: Context) {
         if(!started.compareAndSet(false,true)) return
-        try { context=c; resources=c.createPackageContext(BuildConfigWrapper.APPLICATION_ID,0).resources; ConfigData.initFramework(module.getRemotePreferences("app_errors_tracking")); FrameworkHooker.initialize(c) }
+        try { resources=c.createPackageContext(BuildConfigWrapper.APPLICATION_ID,0).resources; ConfigData.initFramework(module.getRemotePreferences("app_errors_tracking")); FrameworkHooker.initialize(c); context=c }
         catch(t: Throwable) { context=null; started.set(false); AppLog.error("System framework initialization failed",t) }
     }
     fun clazz(name: String): Class<*> = Class.forName(name,false,loader)

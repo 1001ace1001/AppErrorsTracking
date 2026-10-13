@@ -80,10 +80,10 @@ object FrameworkHooker {
             "com.android.server.am.ErrorDialogController")
 
     /** 已忽略错误的 APP 数组 - 直到重新解锁 */
-    private var mutedErrorsIfUnlockApps = mutableSetOf<String>()
+    private var mutedErrorsIfUnlockApps = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** 已忽略错误的 APP 数组 - 直到重新启动 */
-    private var mutedErrorsIfRestartApps = mutableSetOf<String>()
+    private var mutedErrorsIfRestartApps = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /**
      * APP 进程异常数据定义类
@@ -228,7 +228,6 @@ object FrameworkHooker {
             }
         },android.content.IntentFilter().apply { addAction(Intent.ACTION_USER_PRESENT); addAction(Intent.ACTION_LOCALE_CHANGED) })
         FrameworkTool.Host.with(context) {
-            onPushLoggerData { AppLog.snapshot() }
             onPushLoggerData { AppLog.snapshot() }
             onRefreshFrameworkPrefsData {
                 /** 必要的延迟防止 Sp 存储不刷新 */
