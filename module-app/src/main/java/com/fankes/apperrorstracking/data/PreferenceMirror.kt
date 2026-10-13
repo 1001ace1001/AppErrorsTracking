@@ -7,6 +7,7 @@ import io.github.libxposed.service.XposedServiceHelper
 
 /** Private app preferences are authoritative; each framework receives a complete mirror. */
 internal object PreferenceMirror {
+    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val services = LinkedHashSet<XposedService>()
     private var source: SharedPreferences? = null
     private var registered = false
@@ -35,7 +36,8 @@ internal object PreferenceMirror {
         }
         services.toList().forEach(::mirror)
     }
-    private fun mirror(service: XposedService) {
+    private fun mirror(service: XposedService) { worker.execute { mirrorNow(service) } }
+    private fun mirrorNow(service: XposedService) {
         runCatching {
             val values = source?.all ?: return
             val editor = service.getRemotePreferences(ConfigData.PREFERENCE_GROUP).edit().clear()
