@@ -60,7 +60,8 @@ import com.fankes.apperrorstracking.utils.tool.FrameworkTool
 import com.fankes.apperrorstracking.wrapper.BuildConfigWrapper
 import com.highcapable.kavaref.KavaRef.Companion.resolve
 import com.highcapable.kavaref.extension.VariousClass
-import com.fankes.apperrorstracking.hook.entity.FrameworkRuntime.*
+import com.fankes.apperrorstracking.hook.entity.FrameworkRuntime.lazyClass
+import com.fankes.apperrorstracking.hook.entity.FrameworkRuntime.lazyClassOrNull
 import com.fankes.apperrorstracking.utils.tool.AppLog
 
 object FrameworkHooker {
@@ -218,16 +219,16 @@ object FrameworkHooker {
     }
 
     /** 注册生命周期 */
-    private fun registerLifecycle() {
-        onAppLifecycle {
-            /** 解锁后清空已记录的忽略错误 APP */
-            registerReceiver(Intent.ACTION_USER_PRESENT) { _, _ -> mutedErrorsIfUnlockApps.clear() }
-            /** 刷新模块 Resources 缓存 */
-            registerReceiver(Intent.ACTION_LOCALE_CHANGED) { _, _ -> refreshModuleAppResources() }
-            /** 启动时从本地获取异常记录数据 */
-            onCreate { AppErrorsRecordData.init(context = this) }
-        }
+    fun initialize(context: Context) {
+        AppErrorsRecordData.init(context)
+        context.registerReceiver(object: android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context,i: Intent) {
+                if(i.action==Intent.ACTION_USER_PRESENT) mutedErrorsIfUnlockApps.clear()
+                if(i.action==Intent.ACTION_LOCALE_CHANGED) FrameworkRuntime.resources=c.createPackageContext(BuildConfigWrapper.APPLICATION_ID,0).resources
+            }
+        },android.content.IntentFilter().apply { addAction(Intent.ACTION_USER_PRESENT); addAction(Intent.ACTION_LOCALE_CHANGED) })
         FrameworkTool.Host.with(context) {
+            onPushLoggerData { AppLog.snapshot() }
             onPushLoggerData { AppLog.snapshot() }
             onRefreshFrameworkPrefsData {
                 /** 必要的延迟防止 Sp 存储不刷新 */

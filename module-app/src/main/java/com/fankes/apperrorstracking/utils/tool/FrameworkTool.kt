@@ -146,5 +146,36 @@ object FrameworkTool {
     fun fetchAppListData(context: Context,appFilters: AppFiltersBean,result: (ArrayList<AppInfoBean>)->Unit) = list(context,"apps",Bundle().apply { putString("input",gson.toJson(appFilters)) },AppInfoBean::class.java,result)
     fun fetchLoggerData(context: Context,result: (ArrayList<AppLogData>)->Unit) = list(context,"logger",Bundle(),AppLogData::class.java,result)
     fun restartSystem(context: Context) {
-    
+        /** 当 Root 权限获取失败时显示对话框 */
+        fun showWhenAccessRootFail() =
+            context.showDialog {
+                title = context.getString(R.string.access_root_fail)
+                msg = context.getString(R.string.access_root_fail_tip)
+                confirmButton(context.getString(R.string.got_it))
+            }
+        context.showDialog {
+            title = context.getString(R.string.notice)
+            msg = context.getString(R.string.are_your_sure_restart_system)
+            confirmButton {
+                if (isRootAccess)
+                    execShell(cmd = "reboot")
+                else showWhenAccessRootFail()
+            }
+            neutralButton(context.getString(R.string.fast_restart)) {
+                context.showDialog {
+                    title = context.getString(R.string.warning)
+                    msg = context.getString(R.string.fast_restart_problem)
+                    confirmButton {
+                        if (isRootAccess)
+                            execShell(cmd = "killall zygote")
+                        else showWhenAccessRootFail()
+                    }
+                    cancelButton()
+                }
+            }
+            cancelButton()
+        }
+    }
+
+
 }
