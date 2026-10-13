@@ -25,6 +25,8 @@ import io.github.libxposed.api.XposedModuleInterface
 import com.fankes.apperrorstracking.hook.entity.FrameworkRuntime
 import com.fankes.apperrorstracking.hook.entity.FrameworkHooker
 class HookEntry: XposedModule() {
+    // System-owned receivers and Binder callbacks are retained until reboot.
+    override fun onHotReloading(param: XposedModuleInterface.HotReloadingParam): Boolean = false
     override fun onSystemServerStarting(param: XposedModuleInterface.SystemServerStartingParam) {
         FrameworkRuntime.module=this
         FrameworkRuntime.loader=param.classLoader
