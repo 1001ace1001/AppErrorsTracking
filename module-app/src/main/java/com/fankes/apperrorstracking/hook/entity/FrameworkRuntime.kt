@@ -61,7 +61,8 @@ object FrameworkRuntime {
         override fun registerOnSharedPreferenceChangeListener(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener?) {}
         override fun unregisterOnSharedPreferenceChangeListener(listener: android.content.SharedPreferences.OnSharedPreferenceChangeListener?) {}
     }
-    fun clazz(name: String): Class<*> = Class.forName(name,false,loader)
+    @Suppress("UNCHECKED_CAST")
+    fun clazz(name: String): Class<Any> = Class.forName(name,false,loader) as Class<Any>
     fun lazyClass(name: String) = lazy { clazz(name) }
     fun lazyClassOrNull(vararg names: String) = lazy { names.firstNotNullOfOrNull { runCatching { clazz(it) }.getOrNull() } }
     fun field(instance: Any?,name: String): Any? { if(instance==null) return null; var type: Class<*>?=instance.javaClass; while(type!=null) { val f=runCatching { type!!.getDeclaredField(name) }.getOrNull(); if(f!=null) return f.apply { setAccessible(true) }.get(instance); type=type.superclass }; return null }
