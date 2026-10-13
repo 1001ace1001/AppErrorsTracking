@@ -1,11 +1,12 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.ksp)
+
 }
 
 android {
     namespace = gropify.project.module.app.packageName
     compileSdk = gropify.project.android.compileSdk
+    compileSdkMinor = 0
 
     signingConfigs {
         create("universal") {
@@ -64,9 +65,9 @@ androidComponents {
 }
 
 dependencies {
-    compileOnly(libs.rovo89.xposed.api)
-    implementation(libs.yukihookapi)
-    ksp(libs.yukihookapi.ksp.xposed)
+    compileOnly("io.github.libxposed:api:102.0.0")
+    implementation("io.github.libxposed:service:102.0.0")
+    testImplementation("io.github.libxposed:api:102.0.0")
     implementation(platform(libs.kavaref.bom))
     implementation(libs.kavaref.core)
     implementation(libs.kavaref.android)

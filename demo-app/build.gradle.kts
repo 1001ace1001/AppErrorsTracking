@@ -5,6 +5,7 @@ plugins {
 android {
     namespace = gropify.project.demo.app.packageName
     compileSdk = gropify.project.android.compileSdk
+    compileSdkMinor = 0
     ndkVersion = gropify.project.android.ndk.version
 
     signingConfigs {

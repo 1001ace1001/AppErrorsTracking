@@ -17,9 +17,13 @@
         android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         tools:node="remove" />
 
+    <permission android:name="${applicationId}.FRAMEWORK_ACCESS" android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.FRAMEWORK_ACCESS" />
+
     <application
         android:name=".application.AppErrorsApplication"
         android:allowBackup="true"
+        android:description="@string/xposed_desc"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:localeConfig="@xml/locales_config"
@@ -28,23 +32,13 @@
         android:theme="@style/Theme.AppErrorsTracking"
         tools:targetApi="tiramisu">
 
-        <meta-data
-            android:name="xposedmodule"
-            android:value="true" />
-        <meta-data
+<meta-data
             android:name="xposeddescription"
             android:value="@string/xposed_desc" />
-        <meta-data
-            android:name="xposedminversion"
-            android:value="89" />
-        <meta-data
+<meta-data
             android:name="xposedsharedprefs"
             android:value="true" />
-        <meta-data
-            android:name="xposedscope"
-            android:resource="@array/module_scope" />
-
-        <activity
+<activity
             android:name=".ui.activity.main.MainActivity"
             android:exported="true"
             android:screenOrientation="behind">

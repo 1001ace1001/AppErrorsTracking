@@ -74,3 +74,4 @@
     <init>();
     *** inflate(android.view.LayoutInflater);
 }
+-keep class com.fankes.apperrorstracking.hook.HookEntry { *; }
